@@ -1,0 +1,696 @@
+<template>
+  <div class="container">
+    <h1>🎂 智能生日倒计时</h1>
+    
+    <!-- 倒计时展示区 -->
+    <div v-if="selectedBirthday" class="card countdown-card">
+      <div v-if="isTodayBirthday" class="today-badge" style="margin-bottom: 15px; display: inline-block;">
+        🎉 今天是 {{ selectedBirthday.name }} 的生日！生日快乐！ 🎉
+      </div>
+      <template v-else>
+        <h2 class="countdown-title">
+          距离 {{ selectedBirthday.name }} 的 
+          <span :class="['tag', selectedBirthday.calendarType === 'solar' ? 'tag-solar' : 'tag-lunar']" style="font-size: 1rem; vertical-align: middle;">
+            {{ selectedBirthday.calendarType === 'solar' ? '公历' : '农历' }}生日
+          </span>
+          还有
+        </h2>
+        <div class="timer">
+          <div class="time-unit">
+            <div class="time-value">{{ countdown.days }}</div>
+            <div class="time-label">天</div>
+          </div>
+          <div class="time-unit">
+            <div class="time-value">{{ countdown.hours }}</div>
+            <div class="time-label">时</div>
+          </div>
+          <div class="time-unit">
+            <div class="time-value">{{ countdown.minutes }}</div>
+            <div class="time-label">分</div>
+          </div>
+          <div class="time-unit">
+            <div class="time-value">{{ countdown.seconds }}</div>
+            <div class="time-label">秒</div>
+          </div>
+        </div>
+        <div style="margin-top: 15px; font-size: 0.9rem; opacity: 0.9;">
+          下一个生日公历日期: {{ nextSolarDateStr }}
+        </div>
+      </template>
+    </div>
+
+    <!-- 添加表单 -->
+    <div class="card">
+      <h3 style="margin-bottom: 15px;">➕ 添加新生日</h3>
+      
+      <div class="form-group">
+        <label>姓名</label>
+        <input type="text" v-model.trim="form.name" placeholder="例如：张三" @keyup.enter="addBirthday" />
+      </div>
+      
+      <!-- 新增：输入模式选择 -->
+      <div class="form-group">
+        <label>输入方式</label>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" value="solarInput" v-model="form.inputMode" />
+            <span>输入公历 (身份证日期)</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" value="lunarInput" v-model="form.inputMode" />
+            <span>直接输入农历</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- 场景1：输入公历 -->
+      <div class="form-group" v-if="form.inputMode === 'solarInput'">
+        <label>出生日期 (公历)</label>
+        <input type="date" v-model="form.solarDateInput" :max="today" />
+        <p style="font-size: 0.8rem; color: #888; margin-top: 5px;">* 系统将以此公历日期为基准</p>
+      </div>
+
+      <!-- 场景2：输入农历 -->
+      <div class="form-group" v-if="form.inputMode === 'lunarInput'">
+        <label>出生农历日期</label>
+        <div style="display: flex; gap: 10px;">
+          <select v-model="form.lunarYear" style="flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 8px;">
+            <option value="" disabled>选择年份</option>
+            <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}年</option>
+          </select>
+          <select v-model="form.lunarMonth" style="flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 8px;">
+            <option value="" disabled>选择月份</option>
+            <option v-for="m in lunarMonthOptions" :key="m.value" :value="m.value">{{ m.label }}</option>
+          </select>
+          <select v-model="form.lunarDay" style="flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 8px;">
+            <option value="" disabled>选择日期</option>
+            <option v-for="d in lunarDayOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
+          </select>
+        </div>
+        <div v-if="convertedSolarDate" style="margin-top: 8px; font-size: 0.9rem; color: var(--primary-color);">
+          对应公历: {{ convertedSolarDate }}
+        </div>
+        <p v-else-if="form.inputMode === 'lunarInput' && form.lunarYear && form.lunarMonth && form.lunarDay" style="margin-top: 8px; font-size: 0.9rem; color: #ff6b6b;">
+          该农历日期不存在 (可能是闰月或小月问题)
+        </p>
+      </div>
+
+      <div class="form-group">
+        <label>以后过哪种生日？</label>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" value="lunar" v-model="form.calendarType" />
+            <span>每年过农历生日 (推荐)</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" value="solar" v-model="form.calendarType" />
+            <span>每年过公历生日</span>
+          </label>
+        </div>
+      </div>
+      
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary" @click="addBirthday" :disabled="loading || !isFormValid">
+          {{ loading ? '保存中...' : '保存' }}
+        </button>
+        <button class="btn btn-secondary" @click="resetForm">重置</button>
+      </div>
+    </div>
+
+    <!-- 列表区 -->
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <h3>📋 生日列表</h3>
+        <span style="color: #6c757d; font-size: 0.9rem;">共 {{ birthdays.length }} 人</span>
+      </div>
+      
+      <ul class="birthday-list">
+        <li v-for="bday in sortedBirthdays" :key="bday.id" 
+            class="birthday-item" 
+            :class="{ active: selectedBirthday && selectedBirthday.id === bday.id }">
+          
+          <div class="bday-info">
+            <h4>
+              {{ bday.name }}
+              <span :class="['tag', bday.calendarType === 'solar' ? 'tag-solar' : 'tag-lunar']">
+                {{ bday.calendarType === 'solar' ? '公历' : '农历' }}
+              </span>
+              <span v-if="isBirthdayToday(bday)" class="today-badge">今天生日</span>
+            </h4>
+            <p>
+              出生公历: {{ formatSolarDate(bday.solarDate) }}
+              <br>
+              <span v-if="bday.calendarType === 'lunar'" style="color: #4caf50;">
+                对应农历: {{ getLunarDisplay(bday.solarDate) }}
+              </span>
+            </p>
+          </div>
+          
+          <div class="actions">
+            <button class="btn btn-primary btn-sm" @click="viewCountdown(bday)">查看倒计时</button>
+            <button class="btn btn-danger btn-sm" @click="deleteBirthday(bday.id)">删除</button>
+          </div>
+        </li>
+        
+        <li v-if="birthdays.length === 0" class="empty-state">
+          <p>暂无生日记录</p>
+          <p style="font-size: 0.85rem; margin-top: 5px;">在上方添加第一个生日吧</p>
+        </li>
+      </ul>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, onUnmounted } from 'vue';
+
+// 工具函数：获取农历显示字符串
+function getLunarString(solarDateStr) {
+  if (typeof Solar === 'undefined' || typeof Lunar === 'undefined') {
+    return '加载中...';
+  }
+  try {
+    const [y, m, d] = solarDateStr.split('-').map(Number);
+    const solar = Solar.fromYmd(y, m, d);
+    const lunar = solar.getLunar();
+    return `${lunar.getMonthInChinese()}月${lunar.getDayInChinese()}`;
+  } catch (e) {
+    return '日期无效';
+  }
+}
+
+// 状态管理
+const birthdays = ref([]);
+const selectedBirthday = ref(null);
+const loading = ref(false);
+
+// 表单结构
+const form = ref({ 
+  name: '', 
+  inputMode: 'solarInput', // 'solarInput' | 'lunarInput'
+  solarDateInput: '',      // 公历输入框绑定
+  calendarType: 'lunar',   // 以后过什么生日
+  // 农历输入字段
+  lunarYear: '',
+  lunarMonth: '',
+  lunarDay: ''
+});
+
+const countdown = ref({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+const nextSolarDateStr = ref(''); 
+
+let timerInterval = null;
+const today = new Date().toISOString().split('T')[0];
+const currentYear = new Date().getFullYear();
+
+// 农历相关计算与选项
+
+// 生成年份选项 (过去100年到今年)
+const yearOptions = computed(() => {
+  const years = [];
+  for (let i = 0; i < 100; i++) {
+    years.push(currentYear - i);
+  }
+  return years;
+});
+
+// 生成农历月份选项 (1-12)
+const lunarMonthOptions = computed(() => {
+  const months = [];
+  for (let i = 1; i <= 12; i++) {
+    months.push({ value: i, label: `${i}月` });
+  }
+  return months;
+});
+
+// 生成农历日期选项 (1-30)
+const lunarDayOptions = computed(() => {
+  const days = [];
+  for (let i = 1; i <= 30; i++) {
+    days.push({ value: i, label: `${i}日` });
+  }
+  return days;
+});
+
+// 计算属性：实时将输入的农历转换为公历显示
+const convertedSolarDate = computed(() => {
+  if (form.value.inputMode !== 'lunarInput') return '';
+  if (!form.value.lunarYear || !form.value.lunarMonth || !form.value.lunarDay) return '';
+  
+  if (typeof Lunar === 'undefined') return '加载中...';
+
+  try {
+    const y = parseInt(form.value.lunarYear);
+    const m = parseInt(form.value.lunarMonth);
+    const d = parseInt(form.value.lunarDay);
+
+    // 尝试构建农历对象
+    const lunar = Lunar.fromYmd(y, m, d);
+    const solar = lunar.getSolar();
+    
+    // 验证转换后的日期是否合法
+    return `${solar.getYear()}-${String(solar.getMonth()).padStart(2, '0')}-${String(solar.getDay()).padStart(2, '0')}`;
+  } catch (e) {
+    return null; // 返回 null 表示无效
+  }
+});
+
+// 表单验证逻辑
+const isFormValid = computed(() => {
+  if (!form.value.name) return false;
+  if (form.value.inputMode === 'solarInput') {
+    return !!form.value.solarDateInput;
+  } else {
+    // 农历模式下，必须能成功转换为公历
+    return !!convertedSolarDate.value;
+  }
+});
+
+// 计算属性
+const isTodayBirthday = computed(() => {
+  if (!selectedBirthday.value) return false;
+  return isBirthdayToday(selectedBirthday.value);
+});
+
+const sortedBirthdays = computed(() => {
+  return [...birthdays.value].sort((a, b) => {
+    const daysA = getDaysToNextBirthday(a);
+    const daysB = getDaysToNextBirthday(b);
+    return daysA - daysB;
+  });
+});
+
+// 生命周期
+onMounted(() => {
+  loadBirthdays();
+  if (birthdays.value.length > 0) {
+    viewCountdown(birthdays.value[0]);
+  }
+});
+
+onUnmounted(() => {
+  clearTimer();
+});
+
+// 数据存储
+function loadBirthdays() {
+  try {
+    const stored = localStorage.getItem('birthdays_v3'); 
+    if (stored) {
+      birthdays.value = JSON.parse(stored);
+      birthdays.value.forEach(b => {
+        if (!b.calendarType) b.calendarType = 'lunar';
+      });
+    }
+  } catch (e) {
+    console.error('读取数据失败', e);
+  }
+}
+
+function saveBirthdays() {
+  localStorage.setItem('birthdays_v3', JSON.stringify(birthdays.value));
+}
+
+// 添加生日逻辑
+function addBirthday() {
+  if (!isFormValid.value) return;
+  
+  loading.value = true;
+  
+  setTimeout(() => {
+    let finalSolarDate = '';
+
+    // 根据输入模式确定最终的公历基准日期
+    if (form.value.inputMode === 'solarInput') {
+      finalSolarDate = form.value.solarDateInput;
+    } else {
+      // 农历输入模式，使用计算好的公历日期
+      finalSolarDate = convertedSolarDate.value;
+    }
+
+    const newBirthday = {
+      id: Date.now().toString(36) + Math.random().toString(36).substr(2),
+      name: form.value.name,
+      solarDate: finalSolarDate, // 始终存储公历日期作为基准
+      calendarType: form.value.calendarType, // 存储未来过生日的类型
+      createdAt: new Date().toISOString()
+    };
+    
+    birthdays.value.unshift(newBirthday);
+    saveBirthdays();
+    resetForm();
+    viewCountdown(newBirthday);
+    
+    loading.value = false;
+  }, 300);
+}
+
+// 重置表单
+function resetForm() {
+  form.value = { 
+    name: '', 
+    inputMode: 'solarInput', 
+    solarDateInput: '', 
+    calendarType: 'lunar',
+    lunarYear: '',
+    lunarMonth: '',
+    lunarDay: ''
+  };
+}
+
+// 倒计时相关
+function viewCountdown(birthday) {
+  selectedBirthday.value = birthday;
+  updateCountdown(birthday);
+  clearTimer();
+  timerInterval = setInterval(() => updateCountdown(birthday), 1000);
+}
+
+function clearTimer() {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+}
+
+function updateCountdown(birthday) {
+  if (!birthday) return;
+  const now = new Date();
+  const nextDate = getNextBirthdayDate(birthday);
+  
+  if (!nextDate) {
+    countdown.value = { days: 0, hours: 0, minutes: 0, seconds: 0 };
+    return;
+  }
+
+  nextSolarDateStr.value = `${nextDate.getFullYear()}年${nextDate.getMonth() + 1}月${nextDate.getDate()}日`;
+  const diff = nextDate.getTime() - now.getTime();
+
+  if (diff <= 0) {
+     if (now.getDate() === nextDate.getDate() && now.getMonth() === nextDate.getMonth() && now.getFullYear() === nextDate.getFullYear()) {
+         countdown.value = { days: 0, hours: 0, minutes: 0, seconds: 0 };
+     } else {
+         calculateTimeDiff(0);
+     }
+  } else {
+    calculateTimeDiff(diff);
+  }
+}
+
+function calculateTimeDiff(diffMs) {
+  countdown.value = {
+    days: Math.floor(diffMs / (1000 * 60 * 60 * 24)),
+    hours: Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+    minutes: Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60)),
+    seconds: Math.floor((diffMs % (1000 * 60)) / 1000)
+  };
+}
+
+// 核心算法
+function getNextBirthdayDate(birthday) {
+  if (birthday.calendarType === 'solar') {
+    return getNextSolarBirthdayDate(birthday.solarDate);
+  } else {
+    return getNextLunarBirthdayDate(birthday.solarDate);
+  }
+}
+
+function getNextSolarBirthdayDate(solarDateStr) {
+  try {
+    const [y, m, d] = solarDateStr.split('-').map(Number);
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    let nextDate = new Date(currentYear, m - 1, d);
+    if (nextDate < now) {
+      nextDate.setFullYear(currentYear + 1);
+    }
+    return nextDate;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getNextLunarBirthdayDate(solarDateStr) {
+  if (typeof Solar === 'undefined' || typeof Lunar === 'undefined') return null;
+  try {
+    const [y, m, d] = solarDateStr.split('-').map(Number);
+    const birthSolar = Solar.fromYmd(y, m, d);
+    const birthLunar = birthSolar.getLunar();
+    const lunarMonth = birthLunar.getMonth();
+    const lunarDay = birthLunar.getDay();
+    const currentYear = new Date().getFullYear();
+    
+    for (let i = 0; i < 2; i++) {
+      const targetYear = currentYear + i;
+      try {
+        const targetLunar = Lunar.fromYmd(targetYear, lunarMonth, lunarDay);
+        const targetSolar = targetLunar.getSolar();
+        const targetDate = new Date(targetSolar.getYear(), targetSolar.getMonth() - 1, targetSolar.getDay());
+        const now = new Date();
+        now.setHours(0,0,0,0);
+        targetDate.setHours(0,0,0,0);
+        if (targetDate >= now) {
+          return targetDate;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+    return null;
+  } catch (e) {
+    console.error('农历计算错误', e);
+    return null;
+  }
+}
+
+// 辅助函数
+function getDaysToNextBirthday(birthday) {
+  const nextDate = getNextBirthdayDate(birthday);
+  if (!nextDate) return 9999;
+  const now = new Date();
+  now.setHours(0,0,0,0);
+  const nextDateCopy = new Date(nextDate);
+  nextDateCopy.setHours(0,0,0,0);
+  const diff = nextDateCopy.getTime() - now.getTime();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+function isBirthdayToday(birthday) {
+  const days = getDaysToNextBirthday(birthday);
+  return days === 0;
+}
+
+function deleteBirthday(id) {
+  if (!confirm('确定要删除这条记录吗？')) return;
+  birthdays.value = birthdays.value.filter(b => b.id !== id);
+  saveBirthdays();
+  if (selectedBirthday.value && selectedBirthday.value.id === id) {
+    selectedBirthday.value = null;
+    clearTimer();
+    if (birthdays.value.length > 0) {
+      viewCountdown(birthdays.value[0]);
+    }
+  }
+}
+
+function formatSolarDate(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-');
+  return `${parseInt(y)}年${parseInt(m)}月${parseInt(d)}日`;
+}
+
+function getLunarDisplay(dateStr) {
+  return getLunarString(dateStr);
+}
+</script>
+
+<style>
+:root {
+  --primary-color: #667eea;
+  --secondary-color: #764ba2;
+  --accent-color: #f5576c;
+  --bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --card-bg: rgba(255, 255, 255, 0.95);
+  --solar-color: #2196f3;
+  --lunar-color: #4caf50;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body { 
+  font-family: 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, sans-serif; 
+  background: var(--bg-gradient);
+  min-height: 100vh;
+  padding: 20px;
+  color: #333;
+}
+
+.container { max-width: 800px; margin: 0 auto; }
+
+h1 { 
+  text-align: center; 
+  color: white; 
+  margin-bottom: 30px; 
+  font-size: 2rem; 
+  text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.card { 
+  background: var(--card-bg); 
+  border-radius: 16px; 
+  padding: 25px; 
+  margin-bottom: 20px; 
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15); 
+  transition: transform 0.2s;
+}
+
+/* 倒计时卡片特效 */
+.countdown-card { 
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+  color: white; 
+  text-align: center; 
+  padding: 40px 20px;
+}
+
+.countdown-title { margin-bottom: 20px; font-size: 1.5rem; opacity: 0.95; }
+
+.timer { 
+  display: flex; 
+  justify-content: center; 
+  gap: 20px; 
+  flex-wrap: wrap;
+}
+
+.time-unit { 
+  background: rgba(255,255,255,0.2); 
+  padding: 15px; 
+  border-radius: 12px; 
+  min-width: 80px;
+  backdrop-filter: blur(5px);
+}
+
+.time-value { font-size: 2rem; font-weight: bold; line-height: 1; }
+.time-label { font-size: 0.85rem; margin-top: 5px; opacity: 0.9; }
+
+/* 表单样式 */
+.form-group { margin-bottom: 15px; }
+label { display: block; margin-bottom: 8px; font-weight: 600; color: #444; }
+
+input[type="text"], input[type="date"] { 
+  width: 100%; 
+  padding: 12px; 
+  border: 1px solid #ddd; 
+  border-radius: 8px; 
+  font-size: 1rem; 
+  transition: border-color 0.3s;
+}
+
+input:focus { outline: none; border-color: var(--primary-color); }
+
+/* 单选框样式 */
+.radio-group {
+  display: flex;
+  gap: 20px;
+  margin-top: 5px;
+}
+.radio-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: normal;
+}
+.radio-label input {
+  margin-right: 8px;
+  width: auto;
+}
+
+/* 按钮样式 */
+.btn { 
+  padding: 12px 24px; 
+  border: none; 
+  border-radius: 8px; 
+  cursor: pointer; 
+  font-size: 1rem; 
+  font-weight: 600;
+  transition: all 0.2s; 
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none !important; }
+
+.btn-primary { background: var(--primary-color); color: white; }
+.btn-primary:hover:not(:disabled) { background: #5a6fd6; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
+
+.btn-danger { background: #ff6b6b; color: white; }
+.btn-danger:hover { background: #fa5252; }
+
+.btn-secondary { background: #e9ecef; color: #495057; }
+.btn-secondary:hover { background: #dee2e6; }
+
+.btn-sm { padding: 6px 12px; font-size: 0.85rem; }
+
+/* 列表样式 */
+.birthday-list { list-style: none; }
+
+.birthday-item { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  padding: 15px; 
+  background: #f8f9fa; 
+  border-radius: 10px; 
+  margin-bottom: 10px; 
+  border-left: 4px solid transparent;
+  transition: all 0.2s;
+}
+
+.birthday-item:hover { background: #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+.birthday-item.active { border-left-color: var(--primary-color); background: #fff; }
+
+.bday-info h4 { margin-bottom: 4px; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;}
+.bday-info p { color: #6c757d; font-size: 0.9rem; }
+
+.tag {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: bold;
+  color: white;
+}
+.tag-solar { background-color: var(--solar-color); }
+.tag-lunar { background-color: var(--lunar-color); }
+
+.actions { display: flex; gap: 8px; }
+
+.empty-state { text-align: center; padding: 40px; color: #adb5bd; }
+
+.info-banner {
+  background: #e3f2fd;
+  color: #0d47a1;
+  padding: 10px 15px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.today-badge {
+  background: #ffd700;
+  color: #d35400;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 0.8rem;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+</style>
