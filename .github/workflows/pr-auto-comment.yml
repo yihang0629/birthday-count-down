@@ -29,7 +29,11 @@ jobs:
             });
             
             const commitCount = commits.data.length;
-            const commitList = commits.data.map(c => `- ${c.commit.message}`).join('\n');
+            const commitList = commits.data.map(c => {
+              const msg = c.commit && c.commit.message ? c.commit.message : '无提交信息';
+              const firstLine = msg.split('\n')[0];
+              return `- ${firstLine}`;
+            }).join('\n');
             
             const commentBody = `## 🎉 感谢提交 PR！
 
