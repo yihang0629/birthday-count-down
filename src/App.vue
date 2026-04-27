@@ -493,6 +493,16 @@ function deleteBirthday(id) {
   }
 }
 
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  else {
+    const [y, m, d] = dateStr.split('-');
+    return `${y}年${m}月${d}日`;
+  }
+  const [y, m, d] = dateStr.split('-');
+  return `${y}年${m}月${d}日`;
+}
+
 function formatSolarDate(dateStr) {
   if (!dateStr) return '';
   const [y, m, d] = dateStr.split('-');
